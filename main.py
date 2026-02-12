@@ -2,46 +2,27 @@
 Time2Log User Backend - FastAPI Implementation
 A simpler, shorter Python equivalent to the Java Spring Boot backend.
 """
-import os
-import hashlib
-import asyncio
-from datetime import datetime, timedelta
-from typing import Optional
-from dataclasses import dataclass
+import logging
 
-import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
-from jose import jwt, jwk
-from jose.exceptions import JWTError
-from pydantic_settings import BaseSettings
-from supabase import create_client, Client
 
-from config.config import Settings
+from config import settings
+from models.user import TokenMetadata
+from services.jwt_service import JwtService
+from utils.cookies import get_token_from_cookie
 
-from models.main import JwksKeyCache, TokenMetadata, LoginRequest, LoginResponse, TokenValidationResponse
-from services.services import JwtService, SupabaseAuthService
+# Import routers
+from api.auth import router as auth_router
+from api.admin import router as admin_router
+from api.health import router as health_router
 
-settings = Settings()
-
-# Initialize Supabase client
-supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-SUPABASE_AUTH_URL = f"{settings.SUPABASE_URL}/auth/v1"
-
-
-
-
-
-
-
-key_cache = JwksKeyCache()
-
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ================================
 # FastAPI App
@@ -61,64 +42,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ================================
-# Cookie Utilities
-# ================================
-def create_auth_cookie(token: str) -> dict:
-    is_prod = settings.ENVIRONMENT == "production"
-    return {
-        "key": settings.COOKIE_NAME,
-        "value": token,
-        "httponly": True,
-        "secure": is_prod,
-        "samesite": "none" if is_prod else "lax",
-        "max_age": 3600 * 24 * 7,  # 7 days
-    }
-
-
-def clear_auth_cookie() -> dict:
-    return {
-        "key": settings.COOKIE_NAME,
-        "value": "",
-        "httponly": True,
-        "secure": settings.ENVIRONMENT == "production",
-        "samesite": "none" if settings.ENVIRONMENT == "production" else "lax",
-        "max_age": 0,
-        "expires": 0,
-    }
+# Include routers
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(health_router)
 
 
 # ================================
 # Dependencies
 # ================================
-async def get_token_from_cookie(
-    request: Request,
-    token: Optional[str] = Cookie(None, alias=settings.COOKIE_NAME),
-) -> Optional[str]:
-    if token:
-        return token
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    return None
-
-
 async def require_auth(
-    token: Optional[str] = Depends(get_token_from_cookie),
+    token = Depends(get_token_from_cookie),
 ) -> TokenMetadata:
+    """Require authenticated user"""
     if not token:
+        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     metadata = await JwtService.validate_token(token)
     if not metadata:
+        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Invalid token")
 
     return metadata
 
 
 def require_role(*roles: str):
+    """Require specific role(s)"""
     async def role_checker(metadata: TokenMetadata = Depends(require_auth)) -> TokenMetadata:
+        from fastapi import HTTPException
         if metadata.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return metadata
@@ -126,108 +78,16 @@ def require_role(*roles: str):
 
 
 # ================================
-# Routes
+# Lifespan Event
 # ================================
-@app.post("/api/login", response_model=LoginResponse)
-async def login(req: LoginRequest, response: Response):
-    """Authenticate user with Supabase and set HTTP-only cookie"""
-    result = await SupabaseAuthService.login(req.email, req.password)
-    access_token = result.get("access_token")
-
-    user_data = await SupabaseAuthService.get_user(access_token)
-    user_metadata = user_data.get("user_metadata", {})
-
-    response.set_cookie(**create_auth_cookie(access_token))
-
-    return LoginResponse(
-        access_token=access_token,
-        user_id=user_data["id"],
-        email=user_data["email"],
-        role=user_data.get("app_metadata", {}).get("role", "authenticated"),
-        person_name=user_metadata.get("person_name"),
-    )
-
-
-@app.get("/api/verify-token", response_model=TokenValidationResponse)
-async def verify_token(
-    token: Optional[str] = Depends(get_token_from_cookie),
-):
-    """Validate JWT token from cookie"""
-    if not token:
-        return TokenValidationResponse(valid=False)
-
-    metadata = await JwtService.validate_token(token)
-    if not metadata:
-        return TokenValidationResponse(valid=False)
-
-    return TokenValidationResponse(
-        valid=True,
-        user_id=metadata.user_id,
-        email=metadata.email,
-        role=metadata.role,
-        person_id=metadata.person_id,
-        person_name=metadata.person_name,
-    )
-
-
-@app.post("/api/logout")
-async def logout(response: Response):
-    """Clear authentication cookie"""
-    response.delete_cookie(**clear_auth_cookie())
-    return {"message": "Logged out successfully"}
-
-
-@app.post("/api/auth/validate")
-async def validate_auth_header(authorization: Optional[str] = None):
-    """Legacy endpoint for Bearer token validation (backward compatibility)"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-
-    token = authorization[7:]
-    metadata = await JwtService.validate_token(token)
-    if not metadata:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    return {
-        "valid": True,
-        "user_id": metadata.user_id,
-        "email": metadata.email,
-        "role": metadata.role,
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/api/admin/schemas")
-async def get_schemas():
-    """Discover all schemas and tables - for testing/admin purposes"""
-    print("SCHEMA ENDPOINT CALLED")
-    import io
-    import sys
-
-    # Capture print output
-    old_stdout = sys.stdout
-    sys.stdout = buffer = io.StringIO()
-
-    try:
-        await discover_database_schemas()
-        output = buffer.getvalue()
-    except Exception as e:
-        output = f"Error: {e}"
-    finally:
-        sys.stdout = old_stdout
-
-    return {"output": output, "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/api/test")
-async def test_endpoint():
-    """Simple test endpoint"""
-    return {"message": "Test endpoint working", "timestamp": datetime.now().isoformat()}
+@app.on_event("startup")
+async def startup_event():
+    """Log application startup"""
+    logger.info(f"Starting {app.title} v{app.version}")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"CORS Origins: {settings.CORS_ORIGINS}")
+    logger.info(f"Supabase URL: {settings.SUPABASE_URL[:30]}...")
+    logger.info("✅ All systems initialized")
 
 
 # ================================
@@ -235,4 +95,9 @@ async def test_endpoint():
 # ================================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.PORT,
+        log_level="info"
+    )

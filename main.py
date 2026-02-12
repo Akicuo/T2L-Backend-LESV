@@ -23,22 +23,10 @@ from jose.exceptions import JWTError
 from pydantic_settings import BaseSettings
 from supabase import create_client, Client
 
-# ================================
-# Configuration
-# ================================
-class Settings(BaseSettings):
-    SUPABASE_URL: str
-    SUPABASE_KEY: str
-    JWT_SECRET: Optional[str] = None
-    COOKIE_NAME: str = "supabase-auth-token"
-    ENVIRONMENT: str = "development"
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
-    PORT: int = 8080
+from config.config import Settings
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-
+from models.main import JwksKeyCache, TokenMetadata, LoginRequest, LoginResponse, TokenValidationResponse
+from services.services import JwtService, SupabaseAuthService
 
 settings = Settings()
 
@@ -47,236 +35,12 @@ supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 SUPABASE_AUTH_URL = f"{settings.SUPABASE_URL}/auth/v1"
 
 
-# ================================
-# Database Schema Discovery
-# ================================
-async def discover_database_schemas():
-    """Query Supabase to discover all schemas and tables using the Python client"""
-    print("\n" + "=" * 60)
-    print("DATABASE SCHEMA DISCOVERY")
-    print("=" * 60)
-
-    try:
-        print(f"\nSupabase URL: {settings.SUPABASE_URL}")
-        print(f"Auth URL: {SUPABASE_AUTH_URL}")
-        print(f"Cookie Name: {settings.COOKIE_NAME}")
-        print(f"CORS Origins: {settings.CORS_ORIGINS}")
-        print(f"Environment: {settings.ENVIRONMENT}")
-        print(f"Port: {settings.PORT}")
-
-        # Try to list common tables using Supabase client
-        print("\n--- Attempting to discover tables via Supabase Client ---")
-        common_tables = ["users", "profiles", "tasks", "time_entries", "persons"]
-
-        for table in common_tables:
-            try:
-                # Use Supabase client to query table
-                response = supabase.table(table).select("*").limit(1).execute()
-
-                # Get count from response
-                count = len(response.data) if response.data else 0
-                print(f"  Table '{table}': EXISTS (query successful)")
-
-            except Exception as e:
-                error_str = str(e)
-                if "404" in error_str or "does not exist" in error_str:
-                    print(f"  Table '{table}': NOT FOUND")
-                elif "401" in error_str or "403" in error_str or "permission" in error_str.lower():
-                    print(f"  Table '{table}': ACCESS DENIED")
-                else:
-                    print(f"  Table '{table}': ERROR - {e}")
-
-        print("\n--- Checking Supabase Auth Tables ---")
-        # Auth tables are managed by Supabase, we can check via admin API if needed
-        print("  Auth tables: Managed by Supabase (users, sessions, etc.)")
-
-    except Exception as e:
-        print(f"Schema discovery failed: {e}")
-
-    print("=" * 60 + "\n")
 
 
-# ================================
-# Models
-# ================================
-@dataclass
-class TokenMetadata:
-    user_id: str
-    email: str
-    role: str = "authenticated"
-    person_id: Optional[str] = None
-    person_name: Optional[str] = None
 
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user_id: str
-    email: str
-    role: str
-    person_name: Optional[str] = None
-
-
-class TokenValidationResponse(BaseModel):
-    valid: bool
-    user_id: Optional[str] = None
-    email: Optional[str] = None
-    role: Optional[str] = None
-    person_id: Optional[str] = None
-    person_name: Optional[str] = None
-
-
-# ================================
-# JWT Key Cache
-# ================================
-class JwksKeyCache:
-    def __init__(self, ttl_seconds: int = 300):
-        self._cache: dict[tuple[str, str], tuple[dict, datetime]] = {}
-        self._ttl = timedelta(seconds=ttl_seconds)
-
-    def get(self, kid: str, alg: str = "ES256") -> Optional[dict]:
-        key = (kid, alg)
-        if key in self._cache:
-            jwk_data, timestamp = self._cache[key]
-            if datetime.now() - timestamp < self._ttl:
-                return jwk_data
-            del self._cache[key]
-        return None
-
-    def set(self, kid: str, jwk_data: dict, alg: str = "ES256"):
-        self._cache[(kid, alg)] = (jwk_data, datetime.now())
-
-    def clear(self):
-        self._cache.clear()
 
 
 key_cache = JwksKeyCache()
-
-
-# ================================
-# Services
-# ================================
-class JwtService:
-    """JWT validation using Supabase JWKS"""
-
-    @staticmethod
-    async def fetch_jwks() -> dict:
-        url = f"{settings.SUPABASE_URL}/.well-known/jwks.json"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            response.raise_for_status()
-            return response.json()
-
-    @staticmethod
-    def p256_public_key(x: str, y: str) -> str:
-        """Convert P-256 coordinates to PEM format"""
-        x_bytes = bytes.fromhex(x)
-        y_bytes = bytes.fromhex(y)
-        public_key = ec.EllipticCurvePublicNumbers(
-            x=int.from_bytes(x_bytes, 'big'),
-            y=int.from_bytes(y_bytes, 'big'),
-            curve=ec.SECP256R1()
-        ).public_key(default_backend())
-        return public_key.public_bytes(
-            encoding=hashlib.sha256,
-            format=hashlib.sha256
-        ).hex()
-
-    @classmethod
-    async def validate_token(cls, token: str) -> Optional[TokenMetadata]:
-        try:
-            # Decode header to get kid
-            header = jwt.get_unverified_header(token)
-            kid = header.get("kid")
-            alg = header.get("alg", "ES256")
-
-            # Check cache
-            cached_key = key_cache.get(kid, alg)
-            if cached_key:
-                public_key = jwk.construct(cached_key, alg)
-            else:
-                # Fetch JWKS
-                jwks = await cls.fetch_jwks()
-                for key_data in jwks.get("keys", []):
-                    if key_data.get("kid") == kid:
-                        key_cache.set(kid, key_data, alg)
-                        public_key = jwk.construct(key_data, alg)
-                        break
-                else:
-                    return None
-
-            # Verify and decode token
-            payload = jwt.decode(token, public_key, algorithms=[alg])
-            return TokenMetadata(
-                user_id=payload.get("sub"),
-                email=payload.get("email", ""),
-                role=payload.get("role", "authenticated"),
-                person_id=payload.get("person_id"),
-                person_name=payload.get("person_name"),
-            )
-
-        except (JWTError, Exception):
-            return None
-
-
-class SupabaseAuthService:
-    """Supabase authentication client using the official Python library"""
-
-    @staticmethod
-    async def login(email: str, password: str) -> dict:
-        """Login using Supabase Python client"""
-        try:
-            # Use Supabase client to sign in with password
-            response = supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
-
-            # Return session data
-            return {
-                "access_token": response.session.access_token,
-                "refresh_token": response.session.refresh_token,
-                "expires_in": response.session.expires_in,
-                "user": {
-                    "id": response.user.id,
-                    "email": response.user.email,
-                    "user_metadata": response.user.user_metadata,
-                    "app_metadata": response.user.app_metadata,
-                }
-            }
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}")
-
-    @staticmethod
-    async def get_user(token: str) -> dict:
-        """Get user using Supabase Python client"""
-        try:
-            # Set the access token for this request
-            response = supabase.auth.get_user(token)
-
-            return {
-                "id": response.user.id,
-                "email": response.user.email,
-                "user_metadata": response.user.user_metadata,
-                "app_metadata": response.user.app_metadata,
-                "created_at": response.user.created_at.isoformat() if response.user.created_at else None,
-            }
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
-
-    @staticmethod
-    async def logout(token: str) -> None:
-        """Logout using Supabase Python client"""
-        try:
-            supabase.auth.sign_out()
-        except Exception:
-            # Don't raise an error if logout fails
-            pass
 
 
 # ================================
@@ -296,12 +60,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Run database schema discovery on startup"""
-    await discover_database_schemas()
 
 
 # ================================

@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from jose import jwt, jwk
 from jose.exceptions import JWTError
 from pydantic_settings import BaseSettings
+from supabase import create_client, Client
 
 # ================================
 # Configuration
@@ -40,6 +41,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Initialize Supabase client
+supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 SUPABASE_AUTH_URL = f"{settings.SUPABASE_URL}/auth/v1"
 
 
@@ -47,73 +51,44 @@ SUPABASE_AUTH_URL = f"{settings.SUPABASE_URL}/auth/v1"
 # Database Schema Discovery
 # ================================
 async def discover_database_schemas():
-    """Query Supabase to discover all schemas and tables using the REST API"""
+    """Query Supabase to discover all schemas and tables using the Python client"""
     print("\n" + "=" * 60)
     print("DATABASE SCHEMA DISCOVERY")
     print("=" * 60)
 
     try:
-        async with httpx.AsyncClient() as client:
-            # Query Postgres REST API for schemas and tables
-            # Using Supabase's built-in pg_catalog access via PostgREST
-            headers = {
-                "apikey": settings.SUPABASE_KEY,
-                "Authorization": f"Bearer {settings.SUPABASE_KEY}",
-            }
+        print(f"\nSupabase URL: {settings.SUPABASE_URL}")
+        print(f"Auth URL: {SUPABASE_AUTH_URL}")
+        print(f"Cookie Name: {settings.COOKIE_NAME}")
+        print(f"CORS Origins: {settings.CORS_ORIGINS}")
+        print(f"Environment: {settings.ENVIRONMENT}")
+        print(f"Port: {settings.PORT}")
 
-            # Query schemas
-            schemas_url = f"{settings.SUPABASE_URL}/rest/v1/rpc/exec"
-            schemas_query = "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name;"
+        # Try to list common tables using Supabase client
+        print("\n--- Attempting to discover tables via Supabase Client ---")
+        common_tables = ["users", "profiles", "tasks", "time_entries", "persons"]
 
-            # Alternative: Use direct table query to check available tables
-            tables_url = f"{settings.SUPABASE_URL}/rest/v1/"
-            tables_response = await client.get(tables_url, headers=headers, timeout=10.0)
+        for table in common_tables:
+            try:
+                # Use Supabase client to query table
+                response = supabase.table(table).select("*").limit(1).execute()
 
-            print(f"\nSupabase URL: {settings.SUPABASE_URL}")
-            print(f"Auth URL: {SUPABASE_AUTH_URL}")
-            print(f"Cookie Name: {settings.COOKIE_NAME}")
-            print(f"CORS Origins: {settings.CORS_ORIGINS}")
-            print(f"Environment: {settings.ENVIRONMENT}")
-            print(f"Port: {settings.PORT}")
+                # Get count from response
+                count = len(response.data) if response.data else 0
+                print(f"  Table '{table}': EXISTS (query successful)")
 
-            # Try to list common tables via PostgREST
-            print("\n--- Attempting to discover tables via PostgREST ---")
-            common_tables = ["users", "profiles", "tasks", "time_entries", "persons"]
-            for table in common_tables:
-                try:
-                    resp = await client.get(
-                        f"{settings.SUPABASE_URL}/rest/v1/{table}?limit=1",
-                        headers={**headers, "Prefer": "count=exact"},
-                        timeout=5.0
-                    )
-                    if resp.status_code == 200:
-                        count = resp.headers.get("content-range", "").split("/")[-1]
-                        print(f"  Table '{table}': EXISTS ({count} rows)")
-                    elif resp.status_code == 401:
-                        print(f"  Table '{table}': ACCESS DENIED")
-                    else:
-                        print(f"  Table '{table}': NOT FOUND (status: {resp.status_code})")
-                except Exception as e:
+            except Exception as e:
+                error_str = str(e)
+                if "404" in error_str or "does not exist" in error_str:
+                    print(f"  Table '{table}': NOT FOUND")
+                elif "401" in error_str or "403" in error_str or "permission" in error_str.lower():
+                    print(f"  Table '{table}': ACCESS DENIED")
+                else:
                     print(f"  Table '{table}': ERROR - {e}")
 
-            print("\n--- Checking Supabase Auth Tables ---")
-            # Check auth users via admin API
-            try:
-                auth_resp = await client.get(
-                    f"{SUPABASE_AUTH_URL}/users",
-                    headers=headers,
-                    timeout=10.0
-                )
-                if auth_resp.status_code == 200:
-                    users = auth_resp.json()
-                    if isinstance(users, list):
-                        print(f"  Auth users: {len(users)} users found")
-                    elif isinstance(users, dict) and "users" in users:
-                        print(f"  Auth users: {len(users['users'])} users found")
-                else:
-                    print(f"  Auth users: Unable to query (status: {auth_resp.status_code})")
-            except Exception as e:
-                print(f"  Auth users: ERROR - {e}")
+        print("\n--- Checking Supabase Auth Tables ---")
+        # Auth tables are managed by Supabase, we can check via admin API if needed
+        print("  Auth tables: Managed by Supabase (users, sessions, etc.)")
 
     except Exception as e:
         print(f"Schema discovery failed: {e}")
@@ -250,48 +225,58 @@ class JwtService:
 
 
 class SupabaseAuthService:
-    """Supabase authentication client"""
+    """Supabase authentication client using the official Python library"""
 
     @staticmethod
     async def login(email: str, password: str) -> dict:
-        url = f"{SUPABASE_AUTH_URL}/token?grant_type=password"
-        headers = {
-            "apikey": settings.SUPABASE_KEY,
-            "Content-Type": "application/json",
-        }
-        payload = {"email": email, "password": password}
+        """Login using Supabase Python client"""
+        try:
+            # Use Supabase client to sign in with password
+            response = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, headers=headers, timeout=10.0)
-
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid credentials")
-
-            return response.json()
+            # Return session data
+            return {
+                "access_token": response.session.access_token,
+                "refresh_token": response.session.refresh_token,
+                "expires_in": response.session.expires_in,
+                "user": {
+                    "id": response.user.id,
+                    "email": response.user.email,
+                    "user_metadata": response.user.user_metadata,
+                    "app_metadata": response.user.app_metadata,
+                }
+            }
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}")
 
     @staticmethod
     async def get_user(token: str) -> dict:
-        url = f"{SUPABASE_AUTH_URL}/user"
-        headers = {
-            "apikey": settings.SUPABASE_KEY,
-            "Authorization": f"Bearer {token}",
-        }
+        """Get user using Supabase Python client"""
+        try:
+            # Set the access token for this request
+            response = supabase.auth.get_user(token)
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            return response.json()
+            return {
+                "id": response.user.id,
+                "email": response.user.email,
+                "user_metadata": response.user.user_metadata,
+                "app_metadata": response.user.app_metadata,
+                "created_at": response.user.created_at.isoformat() if response.user.created_at else None,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
     @staticmethod
     async def logout(token: str) -> None:
-        url = f"{SUPABASE_AUTH_URL}/logout"
-        headers = {
-            "apikey": settings.SUPABASE_KEY,
-            "Authorization": f"Bearer {token}",
-        }
-
-        async with httpx.AsyncClient() as client:
-            await client.post(url, headers=headers, timeout=10.0)
+        """Logout using Supabase Python client"""
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            # Don't raise an error if logout fails
+            pass
 
 
 # ================================

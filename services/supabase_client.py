@@ -100,7 +100,8 @@ class SupabaseClient:
         table: str,
         columns: str = "*",
         filters: Optional[dict[str, Any]] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        schema: Optional[str] = None,
     ) -> dict[str, Any]:
         """Select rows from a table"""
         url = f"{self.rest_url}/{table}"
@@ -113,11 +114,16 @@ class SupabaseClient:
         if limit:
             params["limit"] = str(limit)
 
+        headers = self._get_headers()
+        if schema:
+            # Target a specific Postgres schema (e.g. "app") via PostgREST profile headers
+            headers["Accept-Profile"] = schema
+
         response = await self._request(
             "GET",
             url,
             params=params,
-            headers=self._get_headers()
+            headers=headers,
         )
 
         if response.status_code not in (200, 406):
@@ -125,15 +131,24 @@ class SupabaseClient:
 
         return response.json()
 
-    async def table_insert(self, table: str, data: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
+    async def table_insert(
+        self,
+        table: str,
+        data: dict[str, Any] | list[dict[str, Any]],
+        schema: Optional[str] = None,
+    ) -> dict[str, Any]:
         """Insert row(s) into a table"""
         url = f"{self.rest_url}/{table}"
+
+        headers = self._get_headers()
+        if schema:
+            headers["Content-Profile"] = schema
 
         response = await self._request(
             "POST",
             url,
             json=data,
-            headers=self._get_headers()
+            headers=headers,
         )
 
         if response.status_code not in (200, 201):
@@ -145,7 +160,8 @@ class SupabaseClient:
         self,
         table: str,
         data: dict[str, Any],
-        filters: dict[str, Any]
+        filters: dict[str, Any],
+        schema: Optional[str] = None,
     ) -> dict[str, Any]:
         """Update rows in a table"""
         url = f"{self.rest_url}/{table}"
@@ -154,12 +170,16 @@ class SupabaseClient:
         for key, value in filters.items():
             params[key] = f"eq.{value}"
 
+        headers = self._get_headers()
+        if schema:
+            headers["Content-Profile"] = schema
+
         response = await self._request(
             "PATCH",
             url,
             json=data,
             params=params,
-            headers=self._get_headers()
+            headers=headers,
         )
 
         if response.status_code != 200:
@@ -167,7 +187,12 @@ class SupabaseClient:
 
         return response.json()
 
-    async def table_delete(self, table: str, filters: dict[str, Any]) -> None:
+    async def table_delete(
+        self,
+        table: str,
+        filters: dict[str, Any],
+        schema: Optional[str] = None,
+    ) -> None:
         """Delete rows from a table"""
         url = f"{self.rest_url}/{table}"
         params = {}
@@ -175,11 +200,15 @@ class SupabaseClient:
         for key, value in filters.items():
             params[key] = f"eq.{value}"
 
+        headers = self._get_headers()
+        if schema:
+            headers["Content-Profile"] = schema
+
         response = await self._request(
             "DELETE",
             url,
             params=params,
-            headers=self._get_headers()
+            headers=headers,
         )
 
         if response.status_code != 204:

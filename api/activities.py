@@ -1,0 +1,119 @@
+
+
+
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from config import settings
+from models.user import TokenMetadata
+from services.jwt_service import JwtService
+from services.supabase_client import supabase_client
+from utils.cookies import get_token_from_cookie
+
+
+router = APIRouter(prefix="/api", tags=["Activities"])
+
+
+async def _get_current_user(token: str | None) -> TokenMetadata:
+    """
+    Resolve the current user metadata, with optional auth bypass in development.
+    """
+    # Dev-only auth bypass
+    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
+        return TokenMetadata(
+            user_id="dev-user",
+            email="dev@example.com",
+            role="admin",
+            person_id=None,
+            person_name="Dev User",
+        )
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    metadata = await JwtService.validate_token(token)
+    if not metadata:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return metadata
+
+
+@router.post("/activities/create")
+async def create_activity(request: Request, token=Depends(get_token_from_cookie)):
+    """
+    Create a new activity for the authenticated user.
+
+    Flow:
+      1. Ensure the user is authenticated
+      2. Check that the provided activity ID exists in app.pre_defined_activities
+      3. If it does, insert the activity into the activities table
+      4. If it does not, return an error
+    """
+    metadata = await _get_current_user(token)
+    data = await request.json()
+
+    activity = data.get("activity") or {}
+    activity_id = activity.get("id")
+    if not activity_id:
+        raise HTTPException(status_code=400, detail="Missing activity id")
+
+    # Validate predefined activity exists (in app schema)
+    activities = await supabase_client.table_select(
+        "pre_defined_activities",
+        filters={"id": activity_id},
+        limit=1,
+        schema="app",
+    )
+    if not activities:
+        raise HTTPException(status_code=400, detail="Invalid activity id")
+
+    # Insert into activities table
+    await supabase_client.table_insert(
+        "activitiactivities_assignmentses",
+        {
+            "user_id": metadata.user_id,
+            "notes": data.get("notes"),
+            "predefined_activity_id": activity_id,
+            "start_time": data.get("start_time"),
+            "end_time": data.get("end_time"),
+        },
+    )
+
+    return {"message": "Activity created successfully"}
+
+
+@router.get("/activities/history")
+async def get_history(token=Depends(get_token_from_cookie)):
+    """
+    Retrieve all activities for the authenticated user.
+    """
+    metadata = await _get_current_user(token)
+    activities = await supabase_client.table_select(
+        "activities",
+        filters={"user_id": metadata.user_id},
+        schema="app",
+    )
+    if not activities:
+        raise HTTPException(status_code=400, detail="No activities found")
+
+    return activities
+
+
+@router.get("/activities/tags")
+async def get_tags(token=Depends(get_token_from_cookie)):
+    """
+    Protected Endpoint: Only accessible to authenticated users.
+
+    Retrieves all predefined activities as tags.
+    """
+    metadata = await _get_current_user(token)
+    tags = await supabase_client.table_select(
+        "pre_defined_activities",
+        schema="app",
+    )
+    if not tags:
+        raise HTTPException(status_code=400, detail="No tags found")
+
+    return {"data": tags}

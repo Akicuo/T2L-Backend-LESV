@@ -71,7 +71,7 @@ async def create_activity(request: Request, token=Depends(get_token_from_cookie)
 
     # Insert into activities table
     await supabase_client.table_insert(
-        "activitiactivities_assignmentses",
+        "activities_assignments",
         {
             "user_id": metadata.user_id,
             "notes": data.get("notes"),

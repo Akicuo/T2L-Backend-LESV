@@ -61,7 +61,9 @@ async def verify_token(
 @router.post("/logout")
 async def logout(response: Response):
     """Clear authentication cookie"""
-    response.delete_cookie(**clear_auth_cookie())
+    # Use set_cookie with an expired value, since our helper returns
+    # parameters compatible with Response.set_cookie, not delete_cookie.
+    response.set_cookie(**clear_auth_cookie())
     return {"message": "Logged out successfully"}
 
 

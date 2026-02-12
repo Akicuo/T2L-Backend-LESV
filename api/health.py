@@ -8,12 +8,22 @@ from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["Health"])
+router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# Backward compatibility with /api/health path
+@router.get("/api/health")
+async def health_check_api():
+    """Health check endpoint at /api/health (for backward compatibility)"""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat()

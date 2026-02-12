@@ -3,7 +3,7 @@ Cookie utilities for authentication
 """
 from typing import Optional
 
-from fastapi import Response, Cookie
+from fastapi import Request, Cookie
 
 from config import settings
 
@@ -35,7 +35,7 @@ def clear_auth_cookie() -> dict:
 
 
 async def get_token_from_cookie(
-    request,
+    request: Request,
     token: Optional[str] = Cookie(None, alias=settings.COOKIE_NAME),
 ) -> Optional[str]:
     """Extract token from cookie or Authorization header"""

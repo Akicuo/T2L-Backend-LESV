@@ -1,4 +1,4 @@
-    # Time2Log User Backend - Python FastAPI
+# Time2Log User Backend - Python FastAPI
 
 A lightweight, modular Python implementation of the Time2Log User Backend using FastAPI with Supabase integration.
 
@@ -17,7 +17,7 @@ A lightweight, modular Python implementation of the Time2Log User Backend using 
 ## Installation
 
 ```bash
-# Install dependencies (no C compilation required)
+# Install dependencies
 pip install -r requirements.txt
 
 # Or with uv (much faster)
@@ -44,27 +44,283 @@ cp .env.example .env
 
 ```bash
 # Development
-python main.py
-
-# Or with uvicorn directly
-uvicorn main:app --reload
+uvicorn main:app --reload --log-level debug
 
 # Production
 uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
+---
+
 ## API Endpoints
 
-| Method | Path | Description | Auth Required |
-|--------|------|-------------|----------------|
-| POST | `/api/login` | User login with email/password | No |
-| GET | `/api/verify-token` | Validate JWT from cookie | No |
-| POST | `/api/logout` | Clear auth cookie | No |
-| POST | `/api/auth/validate` | Legacy Bearer token validation | No |
-| GET | `/health` | Health check | No |
-| GET | `/api/admin/schemas` | Database schema discovery | Optional |
-| GET | `/api/test` | Simple test endpoint | No |
-| GET | `/docs` | Interactive API documentation (Swagger UI) | No |
+### Public Endpoints
+
+#### Health Check
+
+```
+GET /health
+GET /api/health
+GET /test
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00.000000"
+}
+```
+
+---
+
+#### Login
+
+```
+POST /api/login
+```
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
+```
+
+**Response (200):**
+```json
+{
+  "access_token": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImNiZjY3...",
+  "token_type": "bearer",
+  "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
+  "email": "user@example.com",
+  "role": "authenticated"
+}
+```
+
+**Response (401):**
+```json
+{
+  "detail": "Invalid email or password"
+}
+```
+
+> Sets HTTP-only cookie: `supabase-auth-token`
+
+---
+
+#### Logout
+
+```
+POST /api/logout
+```
+
+**Response (200):**
+```json
+{
+  "message": "Logged out successfully"
+}
+```
+
+---
+
+### Protected Endpoints (Require Authentication)
+
+All protected endpoints require the `supabase-auth-token` cookie or `Authorization: Bearer <token>` header.
+
+---
+
+#### Verify Token
+
+```
+GET /api/verify-token
+```
+
+**Response (valid token):**
+```json
+{
+  "valid": true,
+  "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
+  "email": "user@example.com",
+  "role": "authenticated",
+  "person_id": null,
+  "person_name": null
+}
+```
+
+**Response (invalid/no token):**
+```json
+{
+  "valid": false,
+  "user_id": null,
+  "email": null,
+  "role": null,
+  "person_id": null,
+  "person_name": null
+}
+```
+
+---
+
+#### Validate Token (Bearer)
+
+```
+POST /api/auth/validate
+```
+
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6ImNiZjY3...
+```
+
+**Response (200):**
+```json
+{
+  "valid": true,
+  "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
+  "email": "user@example.com",
+  "role": "authenticated"
+}
+```
+
+**Response (401):**
+```json
+{
+  "detail": "Missing or invalid Authorization header"
+}
+```
+
+---
+
+#### Get Activity Tags
+
+```
+GET /api/activities/tags
+```
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Work",
+      "description": "Work-related activities",
+      "color": "#FF5733"
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Exercise",
+      "description": "Physical activities",
+      "color": "#33FF57"
+    }
+  ]
+}
+```
+
+**Response (400):**
+```json
+{
+  "detail": "No tags found"
+}
+```
+
+---
+
+#### Get Activity History
+
+```
+GET /api/activities/history
+```
+
+**Response (200):**
+```json
+[
+  {
+    "id": "660e8400-e29b-41d4-a716-446655440000",
+    "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
+    "predefined_activity_id": "550e8400-e29b-41d4-a716-446655440000",
+    "notes": "Morning run",
+    "start_time": "2024-01-15T08:00:00",
+    "end_time": "2024-01-15T09:00:00",
+    "created_at": "2024-01-15T09:05:00"
+  }
+]
+```
+
+**Response (400):**
+```json
+{
+  "detail": "No activities found"
+}
+```
+
+---
+
+#### Create Activity
+
+```
+POST /api/activities/create
+```
+
+**Request Body:**
+```json
+{
+  "activity": {
+    "id": "550e8400-e29b-41d4-a716-446655440000"
+  },
+  "notes": "Morning workout session",
+  "start_time": "2024-01-15T08:00:00",
+  "end_time": "2024-01-15T09:30:00"
+}
+```
+
+**Response (200):**
+```json
+{
+  "message": "Activity created successfully"
+}
+```
+
+**Response (400):**
+```json
+{
+  "detail": "Missing activity id"
+}
+```
+```json
+{
+  "detail": "Invalid activity id"
+}
+```
+
+---
+
+#### Admin: Get Schemas
+
+```
+GET /api/admin/schemas
+```
+
+**Response (200):**
+```json
+{
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        {"name": "id", "type": "uuid", "nullable": false},
+        {"name": "email", "type": "text", "nullable": false}
+      ],
+      "row_count": 42
+    }
+  ],
+  "timestamp": "2024-01-15T10:30:00.000000"
+}
+```
+
+---
 
 ## Project Structure
 
@@ -72,68 +328,57 @@ uvicorn main:app --host 0.0.0.0 --port 8080
 T2L-Backend-LESV/
 ├── main.py                     # Application entry point
 ├── config/
-│   ├── settings.py             # Configuration and environment variables
-│   └── __init__.py
+│   └── app_settings.py         # Configuration and environment variables
 ├── models/
-│   ├── auth.py                # Auth request/response models
-│   ├── user.py                # User-related models
-│   ├── jwt.py                 # JWT cache model
-│   ├── schema.py              # Schema discovery models
-│   └── __init__.py
+│   ├── auth.py                 # Auth request/response models
+│   ├── user.py                 # User-related models
+│   ├── jwt.py                  # JWT cache model
+│   └── schema.py               # Schema discovery models
 ├── services/
 │   ├── supabase_client.py      # Lightweight HTTP-based Supabase client
 │   ├── auth_service.py         # Authentication operations
-│   ├── jwt_service.py          # JWT validation
-│   ├── schema_service.py       # Database schema discovery
-│   └── __init__.py
+│   ├── jwt_service.py          # JWT validation with JWKS
+│   └── schema_service.py       # Database schema discovery
 ├── api/
-│   ├── auth.py                # Authentication routes
-│   ├── admin.py               # Admin routes
-│   ├── health.py              # Health check routes
-│   └── __init__.py
+│   ├── auth.py                 # Authentication routes
+│   ├── admin.py                # Admin routes
+│   ├── health.py               # Health check routes
+│   └── activities.py           # Activity routes
 ├── utils/
-│   ├── cookies.py             # Cookie utilities
-│   └── __init__.py
+│   └── cookies.py              # Cookie utilities
 ├── tests/
-│   ├── conftest.py           # Pytest configuration
-│   ├── test_auth.py          # Auth endpoint tests
-│   ├── test_services.py       # Service layer tests
-│   ├── test_schema.py        # Schema discovery tests
-│   └── __init__.py
+│   ├── conftest.py             # Pytest configuration
+│   ├── test_auth.py            # Auth endpoint tests
+│   ├── test_services.py        # Service layer tests
+│   └── test_schema.py          # Schema discovery tests
 ├── scripts/
 │   ├── setup_supabase_functions.sql  # SQL function setup
-│   └── test_manual.py              # Manual testing script
+│   └── test_all_endpoints.py         # Endpoint testing script
+├── docs/
+│   ├── README.md               # Documentation overview
+│   └── routen-und-services.md  # German documentation
 ├── requirements.txt
-├── pyproject.toml
-└── readme.md
+└── README.md
 ```
 
-## Comparison with Java Implementation
+---
 
-| Aspect | Java (Spring) | Python (FastAPI) |
-|--------|---------------|------------------|
-| Lines of Code | ~1500+ | ~600 |
-| Startup Time | ~2-3s | ~0.5s |
-| Memory Usage | ~200-400MB | ~30-50MB |
-| Dependencies | 20+ | 9 (no C extensions) |
-| Async Support | Reactive (WebFlux) | Native (asyncio) |
-| Modularity | Monolithic | Layered/Modular |
+## Testing
 
-## Development
-
+### Run Tests
 ```bash
-# Run with hot reload
-uvicorn main:app --reload --log-level debug
-
-# View API docs
-# Open http://localhost:8080/docs
-
-# Run tests
 pytest
 
-# Run manual test script
-python scripts/test_manual.py
+# With coverage
+pytest --cov=. --cov-report=html
 ```
+
+### Test All Endpoints
+```bash
+python scripts/test_all_endpoints.py --user your@email.com --password "your-password"
+```
+
+---
 
 ## Architecture Notes
 
@@ -143,52 +388,32 @@ This project uses a custom HTTP-based Supabase client instead of the official `s
 - C compilation requirements
 - Installation failures on Linux/Fedora
 
-The client implements only the required features:
-- Authentication (sign-in, sign-out, get user)
-- Database operations (select, insert, update, delete)
-- RPC function calls for schema discovery
-
-### Schema Discovery
-Database schema discovery uses Supabase RPC (Remote Procedure Call) functions:
-1. `get_tables()` - Lists all tables in public schema
-2. `get_table_columns(table_name)` - Gets column info for a table
-3. `get_table_count(table_name)` - Gets row count for a table
-
-These functions must be created in your Supabase database by running the SQL script at `scripts/setup_supabase_functions.sql`.
+### JWT Validation
+- Tokens are validated using Supabase JWKS endpoint
+- Public keys are cached for 5 minutes
+- Audience is validated as `authenticated`
 
 ### Security
 - JWT tokens validated using Supabase JWKS endpoint
 - HTTP-only cookies prevent XSS attacks
-- Role-based access control for protected endpoints
+- Row Level Security (RLS) enforced via user token passthrough
 - CORS properly configured for frontend origins
 
-## Testing
-
-The project includes:
-- **Unit tests** for services (`tests/test_services.py`)
-- **Integration tests** for API endpoints (`tests/test_auth.py`)
-- **Manual testing script** (`scripts/test_manual.py`)
-
-Run tests with:
-```bash
-pytest
-
-# Or with coverage
-pytest --cov=. --cov-report=html
-```
+---
 
 ## Troubleshooting
-
-### Linux/Fedora Installation Issues
-If you encounter C compilation errors with `pyiceberg` or `pyroaring`:
-- This project no longer uses the `supabase` package
-- All dependencies are pure Python with no C extensions
-- Just run `pip install -r requirements.txt`
 
 ### Schema Discovery Not Working
 1. Ensure you've run `scripts/setup_supabase_functions.sql` in Supabase SQL Editor
 2. Check your Supabase URL and KEY in `.env`
 3. Check server logs for specific error messages
+
+### 401 Unauthorized on Activities
+- Ensure you're logged in (cookie is set)
+- Check that the user has RLS permissions on the `app` schema tables
+- Verify tables exist: `app.pre_defined_activities`, `app.activities_assignments`
+
+---
 
 ## License
 

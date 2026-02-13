@@ -53,13 +53,13 @@ async def create_activity(request: Request, token=Depends(get_token_from_cookie)
     if not activities:
         raise HTTPException(status_code=400, detail="Invalid activity id")
 
-    # Insert into activities table
+    # Insert into activities_assignments table
     await supabase_client.table_insert(
         "activities_assignments",
         {
             "user_id": metadata.user_id,
             "notes": data.get("notes"),
-            "predefined_activity_id": activity_id,
+            "activity_id": activity_id,  # Column is named 'activity_id' in DB
             "start_time": data.get("start_time"),
             "end_time": data.get("end_time"),
         },
@@ -77,7 +77,7 @@ async def get_history(token=Depends(get_token_from_cookie)):
     """
     metadata = await _get_current_user(token)
     activities = await supabase_client.table_select(
-        "activities",
+        "activities_assignments",  # Correct table name
         filters={"user_id": metadata.user_id},
         schema="app",
         token=token,

@@ -6,12 +6,13 @@ A lightweight, modular Python implementation of the Time2Log User Backend using 
 
 - **JWT Authentication** with Supabase JWKS validation
 - **HTTP-only Cookies** for secure token storage
-- **CORS Support** for React frontend
+- **CORS Support** for SvelteKit frontend
 - **Token Caching** (5-minute TTL for JWKS)
 - **Role-based Access Control**
 - **Native Async/Await** for better performance
 - **Auto-generated OpenAPI Docs** at `/docs`
 - **Database Schema Discovery** via Supabase RPC
+- **Profile Integration** - Fetches user names from `app.profiles` table
 - **No C Extension Dependencies** - Pure Python implementation
 
 ## Installation
@@ -40,6 +41,11 @@ cp .env.example .env
 # into your Supabase SQL Editor
 ```
 
+4. **Database Requirements**: Ensure these tables exist in your Supabase database:
+   - `app.profiles` - User profile data (id, first_name, last_name)
+   - `app.pre_defined_activities` - Activity templates
+   - `app.activities_assignments` - User activity records
+
 ## Running the Server
 
 ```bash
@@ -48,6 +54,9 @@ uvicorn main:app --reload --log-level debug
 
 # Production
 uvicorn main:app --host 0.0.0.0 --port 8080
+
+# Custom port
+uvicorn main:app --host 0.0.0.0 --port 7200
 ```
 
 ---
@@ -95,14 +104,17 @@ POST /api/login
   "token_type": "bearer",
   "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
   "email": "user@example.com",
-  "role": "authenticated"
+  "role": "authenticated",
+  "person_name": "John Doe"
 }
 ```
+
+> **Note:** `person_name` is fetched from `app.profiles` table. Falls back to email if not found.
 
 **Response (401):**
 ```json
 {
-  "detail": "Invalid email or password"
+  "detail": "Invalid credentials"
 }
 ```
 
@@ -122,6 +134,8 @@ POST /api/logout
   "message": "Logged out successfully"
 }
 ```
+
+> Clears the `supabase-auth-token` cookie
 
 ---
 
@@ -144,10 +158,12 @@ GET /api/verify-token
   "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
   "email": "user@example.com",
   "role": "authenticated",
-  "person_id": null,
-  "person_name": null
+  "person_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
+  "person_name": "John Doe"
 }
 ```
+
+> **Note:** `person_id` and `person_name` are fetched from `app.profiles` table.
 
 **Response (invalid/no token):**
 ```json
@@ -199,21 +215,23 @@ Authorization: Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6ImNiZjY3...
 GET /api/activities/tags
 ```
 
+Returns all predefined activities from `app.pre_defined_activities` table.
+
 **Response (200):**
 ```json
 {
   "data": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
-      "name": "Work",
+      "organization_id": "org-uuid",
+      "key": "work",
+      "label": "Work",
       "description": "Work-related activities",
-      "color": "#FF5733"
-    },
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440001",
-      "name": "Exercise",
-      "description": "Physical activities",
-      "color": "#33FF57"
+      "category": "productivity",
+      "meta": {},
+      "is_active": true,
+      "created_at": "2024-01-15T10:00:00",
+      "updated_at": "2024-01-15T10:00:00"
     }
   ]
 }
@@ -234,17 +252,20 @@ GET /api/activities/tags
 GET /api/activities/history
 ```
 
+Returns user's activity assignments from `app.activities_assignments` table.
+
 **Response (200):**
 ```json
 [
   {
     "id": "660e8400-e29b-41d4-a716-446655440000",
+    "activity_id": "550e8400-e29b-41d4-a716-446655440000",
     "user_id": "be4da1a2-76df-4b0d-a669-75de1b2a20c9",
-    "predefined_activity_id": "550e8400-e29b-41d4-a716-446655440000",
+    "start_time": "2024-01-15T08:00:00+00:00",
+    "end_time": "2024-01-15T09:00:00+00:00",
     "notes": "Morning run",
-    "start_time": "2024-01-15T08:00:00",
-    "end_time": "2024-01-15T09:00:00",
-    "created_at": "2024-01-15T09:05:00"
+    "created_at": "2024-01-15T09:05:00+00:00",
+    "updated_at": "2024-01-15T09:05:00+00:00"
   }
 ]
 ```
@@ -263,6 +284,8 @@ GET /api/activities/history
 ```
 POST /api/activities/create
 ```
+
+Creates a new activity assignment in `app.activities_assignments` table.
 
 **Request Body:**
 ```json
@@ -306,19 +329,49 @@ GET /api/admin/schemas
 **Response (200):**
 ```json
 {
-  "tables": [
-    {
-      "name": "users",
-      "columns": [
-        {"name": "id", "type": "uuid", "nullable": false},
-        {"name": "email", "type": "text", "nullable": false}
-      ],
-      "row_count": 42
-    }
-  ],
+  "tables": ["profiles", "pre_defined_activities", "activities_assignments"],
   "timestamp": "2024-01-15T10:30:00.000000"
 }
 ```
+
+---
+
+## Database Schema
+
+### app.profiles
+| Column | Type | Description |
+|--------|------|-------------|
+| id | uuid | User ID (references auth.users) |
+| first_name | text | User's first name |
+| last_name | text | User's last name |
+| created_at | timestamptz | Creation timestamp |
+| updated_at | timestamptz | Update timestamp |
+
+### app.pre_defined_activities
+| Column | Type | Description |
+|--------|------|-------------|
+| id | uuid | Activity ID |
+| organization_id | uuid | Organization reference |
+| key | text | Activity key |
+| label | text | Display label |
+| description | text | Activity description |
+| category | text | Category name |
+| meta | jsonb | Additional metadata |
+| is_active | boolean | Active status |
+| created_at | timestamptz | Creation timestamp |
+| updated_at | timestamptz | Update timestamp |
+
+### app.activities_assignments
+| Column | Type | Description |
+|--------|------|-------------|
+| id | uuid | Assignment ID |
+| activity_id | uuid | Reference to pre_defined_activities |
+| user_id | uuid | Reference to auth.users |
+| start_time | timestamptz | Start timestamp |
+| end_time | timestamptz | End timestamp |
+| notes | text | User notes |
+| created_at | timestamptz | Creation timestamp |
+| updated_at | timestamptz | Update timestamp |
 
 ---
 
@@ -338,6 +391,7 @@ T2L-Backend-LESV/
 │   ├── supabase_client.py      # Lightweight HTTP-based Supabase client
 │   ├── auth_service.py         # Authentication operations
 │   ├── jwt_service.py          # JWT validation with JWKS
+│   ├── person_service.py       # Profile data fetching
 │   └── schema_service.py       # Database schema discovery
 ├── api/
 │   ├── auth.py                 # Authentication routes
@@ -354,9 +408,6 @@ T2L-Backend-LESV/
 ├── scripts/
 │   ├── setup_supabase_functions.sql  # SQL function setup
 │   └── test_all_endpoints.py         # Endpoint testing script
-├── docs/
-│   ├── README.md               # Documentation overview
-│   └── routen-und-services.md  # German documentation
 ├── requirements.txt
 └── README.md
 ```
@@ -393,6 +444,11 @@ This project uses a custom HTTP-based Supabase client instead of the official `s
 - Public keys are cached for 5 minutes
 - Audience is validated as `authenticated`
 
+### Profile Integration
+- User names are fetched from `app.profiles` table
+- Falls back to email if profile not found
+- Both login and verify-token endpoints return `person_name`
+
 ### Security
 - JWT tokens validated using Supabase JWKS endpoint
 - HTTP-only cookies prevent XSS attacks
@@ -412,6 +468,11 @@ This project uses a custom HTTP-based Supabase client instead of the official `s
 - Ensure you're logged in (cookie is set)
 - Check that the user has RLS permissions on the `app` schema tables
 - Verify tables exist: `app.pre_defined_activities`, `app.activities_assignments`
+
+### person_name is null
+- Ensure `app.profiles` table exists with correct schema
+- Check that the user has a profile record (created automatically via trigger)
+- Verify RLS policies allow user to read their own profile
 
 ---
 

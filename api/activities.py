@@ -1,7 +1,3 @@
-
-
-
-
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -65,6 +61,7 @@ async def create_activity(request: Request, token=Depends(get_token_from_cookie)
         filters={"id": activity_id},
         limit=1,
         schema="app",
+        token=token,
     )
     if not activities:
         raise HTTPException(status_code=400, detail="Invalid activity id")
@@ -80,6 +77,7 @@ async def create_activity(request: Request, token=Depends(get_token_from_cookie)
             "end_time": data.get("end_time"),
         },
         schema="app",
+        token=token,
     )
 
     return {"message": "Activity created successfully"}
@@ -95,6 +93,7 @@ async def get_history(token=Depends(get_token_from_cookie)):
         "activities",
         filters={"user_id": metadata.user_id},
         schema="app",
+        token=token,
     )
     if not activities:
         raise HTTPException(status_code=400, detail="No activities found")
@@ -113,6 +112,7 @@ async def get_tags(token=Depends(get_token_from_cookie)):
     tags = await supabase_client.table_select(
         "pre_defined_activities",
         schema="app",
+        token=token,
     )
     if not tags:
         raise HTTPException(status_code=400, detail="No tags found")

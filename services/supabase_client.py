@@ -102,6 +102,7 @@ class SupabaseClient:
         filters: Optional[dict[str, Any]] = None,
         limit: Optional[int] = None,
         schema: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> dict[str, Any]:
         """Select rows from a table"""
         url = f"{self.rest_url}/{table}"
@@ -114,7 +115,7 @@ class SupabaseClient:
         if limit:
             params["limit"] = str(limit)
 
-        headers = self._get_headers()
+        headers = self._get_headers(use_auth=True, token=token)
         if schema:
             # Target a specific Postgres schema (e.g. "app") via PostgREST profile headers
             headers["Accept-Profile"] = schema
@@ -136,11 +137,12 @@ class SupabaseClient:
         table: str,
         data: dict[str, Any] | list[dict[str, Any]],
         schema: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> dict[str, Any]:
         """Insert row(s) into a table"""
         url = f"{self.rest_url}/{table}"
 
-        headers = self._get_headers()
+        headers = self._get_headers(use_auth=True, token=token)
         if schema:
             headers["Content-Profile"] = schema
 

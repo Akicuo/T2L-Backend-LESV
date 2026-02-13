@@ -3,7 +3,7 @@ Authentication routes
 """
 import logging
 
-from fastapi import APIRouter, HTTPException, Response, Depends
+from fastapi import APIRouter, HTTPException, Response, Depends, Header
 
 from models.auth import LoginRequest, LoginResponse, TokenValidationResponse
 from models.user import TokenMetadata
@@ -41,11 +41,17 @@ async def verify_token(
     token = Depends(get_token_from_cookie),
 ):
     """Validate JWT token from cookie"""
+    logger.info(f"verify-token called, token present: {token is not None}")
+    if token:
+        logger.info(f"Token preview: {token[:50]}...")
+
     if not token:
+        logger.warning("No token found in cookie or header")
         return TokenValidationResponse(valid=False)
 
     metadata = await JwtService.validate_token(token)
     if not metadata:
+        logger.warning("Token validation failed")
         return TokenValidationResponse(valid=False)
 
     return TokenValidationResponse(
@@ -68,7 +74,7 @@ async def logout(response: Response):
 
 
 @router.post("/auth/validate")
-async def validate_auth_header(authorization: str | None = None):
+async def validate_auth_header(authorization: str | None = Header(None)):
     """Legacy endpoint for Bearer token validation (backward compatibility)"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")

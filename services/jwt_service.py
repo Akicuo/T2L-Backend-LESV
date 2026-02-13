@@ -27,7 +27,8 @@ class JwtService:
     @staticmethod
     async def fetch_jwks() -> dict:
         """Fetch JWKS from Supabase"""
-        url = f"{settings.SUPABASE_URL}/.well-known/jwks.json"
+        # Supabase JWKS is at /auth/v1/.well-known/jwks.json
+        url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=10.0)
             response.raise_for_status()
@@ -52,20 +53,28 @@ class JwtService:
     async def validate_token(cls, token: str) -> Optional[TokenMetadata]:
         """Validate JWT token and return metadata"""
         try:
+            logger.info(f"Validating token, length: {len(token) if token else 0}")
+
             # Decode header to get kid
             header = jwt.get_unverified_header(token)
             kid = header.get("kid")
             alg = header.get("alg", "ES256")
+            logger.info(f"Token header - kid: {kid}, alg: {alg}")
 
             # Check cache
             cached_key = key_cache.get(kid, alg)
             if cached_key:
+                logger.info(f"Using cached key for kid: {kid}")
                 public_key = jwk.construct(cached_key, alg)
             else:
                 # Fetch JWKS
+                logger.info(f"Fetching JWKS from {settings.SUPABASE_URL}")
                 jwks = await cls.fetch_jwks()
+                logger.info(f"JWKS fetched, keys count: {len(jwks.get('keys', []))}")
+
                 for key_data in jwks.get("keys", []):
                     if key_data.get("kid") == kid:
+                        logger.info(f"Found matching key for kid: {kid}")
                         key_cache.set(kid, key_data, alg)
                         public_key = jwk.construct(key_data, alg)
                         break
@@ -74,7 +83,15 @@ class JwtService:
                     return None
 
             # Verify and decode token
-            payload = jwt.decode(token, public_key, algorithms=[alg])
+            logger.info("Decoding token with public key...")
+            payload = jwt.decode(
+                token,
+                public_key,
+                algorithms=[alg],
+                audience="authenticated",  # Supabase uses "authenticated" as audience
+            )
+            logger.info(f"Token decoded successfully, sub: {payload.get('sub')}")
+
             return TokenMetadata(
                 user_id=payload.get("sub"),
                 email=payload.get("email", ""),
@@ -83,6 +100,9 @@ class JwtService:
                 person_name=payload.get("person_name"),
             )
 
-        except (JWTError, Exception) as e:
-            logger.warning(f"Token validation failed: {e}")
+        except JWTError as e:
+            logger.error(f"JWT validation failed: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Token validation error: {type(e).__name__}: {e}")
             return None

@@ -1,4 +1,4 @@
-# Time2Log User Backend - Python FastAPI
+    # Time2Log User Backend - Python FastAPI
 
 A lightweight, modular Python implementation of the Time2Log User Backend using FastAPI with Supabase integration.
 

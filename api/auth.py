@@ -9,6 +9,7 @@ from models.auth import LoginRequest, LoginResponse, TokenValidationResponse
 from models.user import TokenMetadata
 from services.auth_service import AuthService
 from services.jwt_service import JwtService
+from services.person_service import PersonService
 from utils.cookies import create_auth_cookie, clear_auth_cookie, get_token_from_cookie
 
 logger = logging.getLogger(__name__)
@@ -23,16 +24,32 @@ async def login(req: LoginRequest, response: Response):
     access_token = result.get("access_token")
 
     user_data = await AuthService.get_user(access_token)
+    user_id = user_data["id"]
     user_metadata = user_data.get("user_metadata", {})
+
+    # Try to get person_name from multiple sources:
+    # 1. user_metadata.person_name (set during registration)
+    # 2. app.persons table lookup by user_id
+    # 3. Fallback to email
+    person_name = user_metadata.get("person_name")
+
+    if not person_name:
+        # Look up person data from app.persons table
+        person = await PersonService.get_person_by_user_id(user_id, access_token)
+        person_name = person.person_name
+
+    # Final fallback to email if no person_name found
+    if not person_name:
+        person_name = user_data.get("email", "")
 
     response.set_cookie(**create_auth_cookie(access_token))
 
     return LoginResponse(
         access_token=access_token,
-        user_id=user_data["id"],
+        user_id=user_id,
         email=user_data["email"],
         role=user_data.get("app_metadata", {}).get("role", "authenticated"),
-        person_name=user_metadata.get("person_name"),
+        person_name=person_name,
     )
 
 
@@ -54,13 +71,20 @@ async def verify_token(
         logger.warning("Token validation failed")
         return TokenValidationResponse(valid=False)
 
+    # Look up person data from app.persons table
+    person = await PersonService.get_person_by_user_id(metadata.user_id, token)
+
+    # Use database person data, fallback to JWT claims, then email
+    person_id = person.person_id or metadata.person_id
+    person_name = person.person_name or metadata.person_name or metadata.email
+
     return TokenValidationResponse(
         valid=True,
         user_id=metadata.user_id,
         email=metadata.email,
         role=metadata.role,
-        person_id=metadata.person_id,
-        person_name=metadata.person_name,
+        person_id=person_id,
+        person_name=person_name,
     )
 
 

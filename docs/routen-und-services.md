@@ -96,20 +96,8 @@ async def geschuetzte_daten(token = Depends(get_token_from_cookie)):
 ```python
 async def _get_current_user(token: str | None) -> TokenMetadata:
     """
-    Hilfsfunktion zur Benutzer-Authentifizierung mit Dev-Bypass.
+    Hilfsfunktion zur Benutzer-Authentifizierung.
     """
-    from config import settings
-
-    # Dev-Modus: Auth umgehen
-    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
-        return TokenMetadata(
-            user_id="dev-user",
-            email="dev@example.com",
-            role="admin",
-            person_id=None,
-            person_name="Dev User",
-        )
-
     if not token:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
 
@@ -356,15 +344,6 @@ router = APIRouter(prefix="/api", tags=["Projekte"])
 
 
 async def _get_current_user(token: str | None) -> TokenMetadata:
-    from config import settings
-    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
-        return TokenMetadata(
-            user_id="dev-user",
-            email="dev@example.com",
-            role="admin",
-            person_id=None,
-            person_name="Dev User",
-        )
     if not token:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     metadata = await JwtService.validate_token(token)

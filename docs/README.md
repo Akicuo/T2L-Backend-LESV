@@ -45,8 +45,6 @@ T2L-Backend-LESV/
 
 1. **Schema-Parameter**: Die meisten Tabellen verwenden das `app` Schema, nicht `public`. Bei Datenbankoperationen `schema="app"` angeben.
 
-2. **Auth-Bypass**: Im Entwicklungsmodus mit `DISABLE_AUTH=true` werden geschützte Routen automatisch mit einem Dev-User bedient.
+2. **Supabase Client**: Dieses Projekt verwendet einen eigenen HTTP-Client statt des offiziellen `supabase` Packages.
 
-3. **Supabase Client**: Dieses Projekt verwendet einen eigenen HTTP-Client statt des offiziellen `supabase` Packages.
-
-4. **Router registrieren**: Neue Router müssen in `main.py` importiert und mit `app.include_router()` registriert werden.
+3. **Router registrieren**: Neue Router müssen in `main.py` importiert und mit `app.include_router()` registriert werden.

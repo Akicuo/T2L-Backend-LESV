@@ -1,8 +1,5 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from config import settings
 from models.user import TokenMetadata
 from services.jwt_service import JwtService
 from services.supabase_client import supabase_client
@@ -14,18 +11,8 @@ router = APIRouter(prefix="/api", tags=["Activities"])
 
 async def _get_current_user(token: str | None) -> TokenMetadata:
     """
-    Resolve the current user metadata, with optional auth bypass in development.
+    Resolve the current user metadata from JWT token.
     """
-    # Dev-only auth bypass
-    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
-        return TokenMetadata(
-            user_id="dev-user",
-            email="dev@example.com",
-            role="admin",
-            person_id=None,
-            person_name="Dev User",
-        )
-
     if not token:
         raise HTTPException(status_code=401, detail="Invalid token")
 

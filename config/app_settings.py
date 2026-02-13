@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
     PORT: int = 8080
-    DISABLE_AUTH: bool = True
 
     class Config:
         env_file = ".env"

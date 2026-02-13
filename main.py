@@ -57,16 +57,6 @@ async def require_auth(
     token = Depends(get_token_from_cookie),
 ) -> TokenMetadata:
     """Require authenticated user"""
-    # Allow auth bypass in development when explicitly enabled
-    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
-        return TokenMetadata(
-            user_id="dev-user",
-            email="dev@example.com",
-            role="admin",
-            person_id=None,
-            person_name="Dev User",
-        )
-
     if not token:
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")

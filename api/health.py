@@ -62,7 +62,6 @@ async def debug_settings():
     """Debug endpoint to see current settings"""
     return {
         "ENVIRONMENT": settings.ENVIRONMENT,
-        "DISABLE_AUTH": settings.DISABLE_AUTH,
         "COOKIE_NAME": settings.COOKIE_NAME,
         "SUPABASE_URL": settings.SUPABASE_URL[:50] + "..." if settings.SUPABASE_URL else None,
     }

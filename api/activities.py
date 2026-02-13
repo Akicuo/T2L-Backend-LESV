@@ -79,6 +79,7 @@ async def create_activity(request: Request, token=Depends(get_token_from_cookie)
             "start_time": data.get("start_time"),
             "end_time": data.get("end_time"),
         },
+        schema="app",
     )
 
     return {"message": "Activity created successfully"}
